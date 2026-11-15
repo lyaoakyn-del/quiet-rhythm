@@ -21,6 +21,7 @@
         </a>
         <div class="topbar-actions">
           <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="Включить тёмную тему"><span id="theme-icon" aria-hidden="true">☾</span></button>
+          <button class="account-button" id="account-button" type="button" aria-haspopup="dialog" aria-expanded="false">Войти</button>
           <button class="icon-button stats-toggle" id="stats-toggle" type="button" aria-label="Открыть статистику" aria-expanded="false" aria-controls="statistics-panel"><span class="stats-icon" aria-hidden="true">▥</span><span class="stats-button-label">Статистика</span></button>
           <button class="install-button" id="install-button" type="button" hidden>Добавить на экран</button>
         </div>
@@ -32,7 +33,7 @@
           <h1 id="page-title">Вернись<br><span>в свой ритм.</span></h1>
           <p class="intro-copy">Выбери ритм под своё состояние: квадрат, неравный квадрат, длинный выдох или циклический вздох.</p>
 
-          <p class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span> Практики и оценки хранятся в этом браузере</p>
+          <p class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span><span id="privacy-note-text">Без аккаунта история хранится только в этом браузере.</span></p>
         </section>
 
         <aside class="settings-card" aria-labelledby="settings-title">
@@ -154,7 +155,7 @@
           </div>
           <button class="close-statistics" id="close-statistics" type="button" aria-label="Закрыть статистику">×</button>
         </div>
-        <p class="statistics-note">Здесь сохраняются завершённые практики и выбранные оценки настроения. Данные доступны только в этом браузере.</p>
+        <p class="statistics-note" id="statistics-note">Завершённые практики и оценки настроения сохраняются в этом браузере. Войди, чтобы синхронизировать их между устройствами.</p>
         <div class="statistics-toolbar">
           <div class="statistics-tabs" role="group" aria-label="Период статистики">
             <button class="statistics-tab is-selected" type="button" data-stats-view="days" aria-pressed="true">По дням</button>
@@ -179,6 +180,28 @@
       <footer class="footer"><span>мягкий ритм · один момент за раз</span><span>дыши без усилия</span></footer>
     </div>
 
+    <div class="mood-overlay account-overlay" id="account-overlay" hidden>
+      <section class="mood-dialog account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" aria-describedby="account-copy">
+        <button class="close-statistics account-close" id="account-close" type="button" aria-label="Закрыть окно аккаунта">×</button>
+        <p class="section-kicker">синхронизация истории</p>
+        <h2 id="account-title" tabindex="-1">Сохрани практики</h2>
+        <p class="mood-copy" id="account-copy">Введи почту. Впервые ссылка создаст аккаунт, а потом будет входить в него.</p>
+        <form class="account-form" id="account-form">
+          <label class="account-field" for="account-email-input">Электронная почта
+            <input class="account-input" id="account-email-input" type="email" autocomplete="email" required>
+          </label>
+          <div class="account-actions">
+            <button class="primary-button" id="account-submit" type="submit">Отправить ссылку на вход</button>
+          </div>
+        </form>
+        <div class="account-signed-in" id="account-signed-in" hidden>
+          <strong id="account-email-label"></strong>
+          <button class="secondary-button" id="account-signout" type="button">Выйти из аккаунта</button>
+        </div>
+        <p class="account-message" id="account-message" role="status" aria-live="polite"></p>
+      </section>
+    </div>
+
     <div class="mood-overlay" id="mood-overlay" hidden>
       <section class="mood-dialog" role="dialog" aria-modal="true" aria-labelledby="mood-title" aria-describedby="mood-copy">
         <p class="section-kicker" id="mood-kicker">короткая отметка</p>
@@ -194,6 +217,6 @@
         <button class="mood-skip" id="mood-skip" type="button">Пропустить</button>
       </section>
     </div>
-    <script src="./app.js" defer></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

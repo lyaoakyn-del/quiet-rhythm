@@ -1,8 +1,13 @@
+import { connectFirebase } from "./firebase.js";
+
 (() => {
   const DEFAULTS = { mode: "square", seconds: 4, rounds: 4, sound: false };
   const SETTINGS_KEY = "quiet-square.settings.v1";
   const SESSIONS_KEY = "quiet-square.sessions.v1";
+  const SESSION_OWNER_KEY = "quiet-square.sessions-owner.v1";
+  const SESSION_BACKUP_PREFIX = `${SESSIONS_KEY}.account.`;
   const THEME_KEY = "quiet-square.theme.v1";
+  const EMAIL_LINK_KEY = "quiet-square.email-link.v1";
   const MOODS = { 1: "тяжело", 2: "грустно", 3: "ровно", 4: "хорошо", 5: "отлично" };
   const MODES = {
     square: {
@@ -65,7 +70,13 @@
     periodLabel: $("period-label"), periodPrev: $("period-prev"), periodNext: $("period-next"),
     statsSummary: $("statistics-summary"), statsInsight: $("statistics-insight"), modeMood: $("mode-mood-statistics"), statsContent: $("statistics-content"),
     clearStats: $("clear-statistics"), moodOverlay: $("mood-overlay"), moodTitle: $("mood-title"), moodKicker: $("mood-kicker"),
-    moodCopy: $("mood-copy"), moodSkip: $("mood-skip"), moodOptions: [...document.querySelectorAll("[data-mood]")]
+    moodCopy: $("mood-copy"), moodSkip: $("mood-skip"), moodOptions: [...document.querySelectorAll("[data-mood]")],
+    accountButton: $("account-button"), accountOverlay: $("account-overlay"), accountClose: $("account-close"),
+    accountForm: $("account-form"), accountEmailInput: $("account-email-input"),
+    accountSubmit: $("account-submit"),
+    accountSignedIn: $("account-signed-in"), accountEmailLabel: $("account-email-label"), accountSignOut: $("account-signout"),
+    accountMessage: $("account-message"), accountTitle: $("account-title"), accountCopy: $("account-copy"),
+    privacyNote: $("privacy-note-text"), statisticsNote: $("statistics-note")
   };
 
   let saved = {};
@@ -82,6 +93,11 @@
   let selectedYear = new Date().getFullYear();
   let moodStage = "";
   let sparkParticles = [];
+  let firebase = null;
+  let cloudUser = null;
+  let cloudUnavailable = false;
+  let completingEmailLink = false;
+  let authEventVersion = 0;
   const state = {
     mode: Object.hasOwn(MODES, saved.mode) ? saved.mode : DEFAULTS.mode,
     seconds: validNumber(saved.seconds, 2, 10, DEFAULTS.seconds),
@@ -138,8 +154,130 @@
     return `настроение ${left} → ${right}`;
   }
 
-  function saveSessions() {
+  function saveSessions({ sync = true } = {}) {
     try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); } catch { /* Keep the session available even if storage is full. */ }
+    if (!sync || !firebase || !cloudUser) return;
+    const uid = cloudUser.uid;
+    firebase.saveSessions(uid, [...sessions]).then(() => {
+      if (cloudUser?.uid === uid) setCloudStatus("История синхронизирована с аккаунтом.");
+    }).catch(() => {
+      if (cloudUser?.uid === uid) setCloudStatus("Нет связи с облаком. История пока сохранена на этом устройстве.");
+    });
+  }
+
+  function setAccountMessage(message, isError = false) {
+    ui.accountMessage.textContent = message || "";
+    ui.accountMessage.classList.toggle("is-error", isError);
+  }
+
+  function setCloudStatus(message = "") {
+    if (cloudUser) {
+      const text = message || "Аккаунт подключён. История синхронизируется между устройствами.";
+      ui.privacyNote.textContent = text;
+      ui.statisticsNote.textContent = text;
+    } else if (cloudUnavailable) {
+      const text = "Облачное подключение недоступно. История остаётся в этом браузере.";
+      ui.privacyNote.textContent = text;
+      ui.statisticsNote.textContent = text;
+    } else {
+      const text = "Без аккаунта история хранится только в этом браузере.";
+      ui.privacyNote.textContent = text;
+      ui.statisticsNote.textContent = "Завершённые практики и оценки настроения сохраняются в этом браузере. Войди, чтобы синхронизировать их между устройствами.";
+    }
+  }
+
+  function renderAccountState() {
+    const signedIn = Boolean(cloudUser);
+    ui.accountButton.textContent = signedIn ? "Аккаунт" : "Войти";
+    ui.accountButton.setAttribute("aria-label", signedIn ? "Открыть аккаунт" : "Войти или создать аккаунт");
+    ui.accountForm.hidden = signedIn;
+    ui.accountSignedIn.hidden = !signedIn;
+    ui.accountEmailLabel.textContent = signedIn ? cloudUser.email || "Аккаунт подключён" : "";
+    ui.accountTitle.textContent = signedIn ? "История синхронизируется" : completingEmailLink ? "Заверши вход" : "Сохрани практики";
+    ui.accountCopy.textContent = signedIn
+      ? "Твои завершённые практики и оценки настроения привязаны к этому аккаунту."
+      : completingEmailLink
+        ? "Введи адрес почты, на который пришла ссылка. Это нужно, если ты открыла письмо на другом устройстве."
+        : "Введи почту. Впервые ссылка создаст аккаунт, а потом будет входить в него. История синхронизируется между устройствами.";
+    ui.accountSubmit.textContent = completingEmailLink ? "Завершить вход по ссылке" : "Отправить ссылку на вход";
+    ui.accountSubmit.disabled = !firebase || cloudUnavailable;
+    setCloudStatus();
+  }
+
+  function backupKey(uid) {
+    return `${SESSION_BACKUP_PREFIX}${uid}`;
+  }
+
+  function readSessionBackup(uid) {
+    try {
+      const records = JSON.parse(localStorage.getItem(backupKey(uid)) || "[]");
+      return Array.isArray(records) ? records.filter((record) => record && Number.isFinite(record.startedAt) && MODES[record.mode]) : [];
+    } catch { return []; }
+  }
+
+  function sessionRevision(record) {
+    return Number(record.updatedAt || record.completedAt || record.startedAt || 0);
+  }
+
+  function mergeSessions(...lists) {
+    const merged = new Map();
+    lists.flat().forEach((candidate) => {
+      if (!candidate || typeof candidate.id !== "string" || !Number.isFinite(candidate.startedAt) || !MODES[candidate.mode]) return;
+      const current = merged.get(candidate.id);
+      if (!current || sessionRevision(candidate) >= sessionRevision(current)) merged.set(candidate.id, candidate);
+    });
+    return [...merged.values()].sort((a, b) => a.startedAt - b.startedAt);
+  }
+
+  async function handleAuthState(user) {
+    const version = ++authEventVersion;
+    cloudUser = user;
+    renderAccountState();
+    if (!user || !firebase) return;
+
+    const uid = user.uid;
+    let localForUser = sessions;
+    let owner = null;
+    try { owner = localStorage.getItem(SESSION_OWNER_KEY); } catch { /* Storage can be unavailable in private mode. */ }
+    if (owner && owner !== uid) {
+      try { localStorage.setItem(backupKey(owner), JSON.stringify(sessions)); } catch { /* Preserve the active account even if backup storage is unavailable. */ }
+      localForUser = readSessionBackup(uid);
+      sessions = localForUser;
+      saveSessions({ sync: false });
+      renderStatistics();
+    }
+
+    setCloudStatus("Загружаю историю из аккаунта…");
+    try {
+      const remote = await firebase.loadSessions(uid);
+      if (version !== authEventVersion || cloudUser?.uid !== uid) return;
+      sessions = mergeSessions(remote, localForUser);
+      try { localStorage.setItem(SESSION_OWNER_KEY, uid); } catch { /* The cloud copy remains available. */ }
+      saveSessions({ sync: false });
+      renderStatistics();
+      await firebase.saveSessions(uid, sessions);
+      if (version !== authEventVersion || cloudUser?.uid !== uid) return;
+      setCloudStatus("История синхронизирована с аккаунтом.");
+      setAccountMessage("Вход выполнен. История синхронизирована.");
+    } catch {
+      if (version !== authEventVersion || cloudUser?.uid !== uid) return;
+      setCloudStatus("Не удалось связаться с облаком. Попробую синхронизировать позже.");
+      setAccountMessage("Не удалось загрузить облачную историю. Локальные записи сохранены.", true);
+    }
+  }
+
+  function friendlyAuthError(error) {
+    const messages = {
+      "auth/invalid-email": "Проверь адрес электронной почты.",
+      "auth/invalid-action-code": "Ссылка уже использована или устарела. Запроси новую ссылку для входа.",
+      "auth/expired-action-code": "Ссылка устарела. Запроси новую ссылку для входа.",
+      "auth/unauthorized-domain": "Адрес сайта ещё не разрешён в Firebase Authentication.",
+      "auth/invalid-continue-uri": "Firebase не принял адрес возврата на сайт. Проверь настройки домена.",
+      "auth/too-many-requests": "Слишком много попыток. Попробуй позже.",
+      "auth/network-request-failed": "Нет связи с Firebase. Проверь подключение к интернету.",
+      "auth/operation-not-allowed": "Вход по почте пока не включён в Firebase."
+    };
+    return messages[error?.code] || "Не удалось выполнить действие. Проверь данные и попробуй ещё раз.";
   }
 
   function setTheme(nextTheme, persist = true) {
@@ -379,6 +517,7 @@
       const record = sessions.find((session) => session.id === state.currentRecordId);
       if (record) {
         record.moodAfter = rating;
+        record.updatedAt = Date.now();
         saveSessions();
       }
       if (!ui.statsPanel.hidden) renderStatistics();
@@ -400,12 +539,150 @@
     }
   }
 
+  function openAccountDialog() {
+    ui.accountOverlay.hidden = false;
+    ui.accountButton.setAttribute("aria-expanded", "true");
+    if (cloudUnavailable) setAccountMessage("Облачный сервис сейчас недоступен. История продолжит сохраняться в браузере.", true);
+    requestAnimationFrame(() => (cloudUser ? ui.accountSignOut : ui.accountEmailInput).focus());
+  }
+
+  function closeAccountDialog() {
+    ui.accountOverlay.hidden = true;
+    ui.accountButton.setAttribute("aria-expanded", "false");
+    ui.accountButton.focus();
+  }
+
+  function cleanEmailLinkUrl() {
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
+  }
+
+  function isCurrentUrlEmailLink() {
+    try { return Boolean(firebase?.isSignInWithEmailLink(window.location.href)); }
+    catch { return false; }
+  }
+
+  function setEmailLinkCompletionMode() {
+    completingEmailLink = true;
+    ui.accountTitle.textContent = "Заверши вход";
+    ui.accountCopy.textContent = "Введи адрес почты, на который пришла ссылка. Это нужно, если ты открыла письмо на другом устройстве.";
+    ui.accountSubmit.textContent = "Завершить вход по ссылке";
+  }
+
+  async function completeEmailLinkSignIn(client, email) {
+    await client.signInWithEmailLink(email, window.location.href);
+    completingEmailLink = false;
+    try { localStorage.removeItem(EMAIL_LINK_KEY); } catch { /* The link can still be completed if storage is unavailable. */ }
+    cleanEmailLinkUrl();
+    setAccountMessage("Вход выполнен. Загружаю историю…");
+  }
+
+  function showEmailLinkError(error) {
+    if (["auth/invalid-action-code", "auth/expired-action-code"].includes(error?.code)) {
+      completingEmailLink = false;
+      cleanEmailLinkUrl();
+      renderAccountState();
+      setAccountMessage("Эта ссылка уже использована или устарела. Отправь новую ссылку для входа.", true);
+      return;
+    }
+    setAccountMessage(friendlyAuthError(error), true);
+  }
+
+  async function finishEmailLinkIfPresent(client) {
+    if (!client.isSignInWithEmailLink(window.location.href)) return;
+    ui.accountOverlay.hidden = false;
+    ui.accountButton.setAttribute("aria-expanded", "true");
+    setEmailLinkCompletionMode();
+    let savedEmail = "";
+    try { savedEmail = localStorage.getItem(EMAIL_LINK_KEY) || ""; } catch { /* Ask the user to re-enter it below. */ }
+    if (savedEmail) {
+      ui.accountEmailInput.value = savedEmail;
+      try {
+        await completeEmailLinkSignIn(client, savedEmail);
+      } catch (error) {
+        showEmailLinkError(error);
+        requestAnimationFrame(() => ui.accountEmailInput.focus());
+      }
+    } else {
+      setAccountMessage("Чтобы завершить вход, введи адрес почты, на который пришла ссылка.");
+      requestAnimationFrame(() => ui.accountEmailInput.focus());
+    }
+  }
+
+  async function sendEmailLinkFromForm(event) {
+    event.preventDefault();
+    if (!firebase || !ui.accountForm.reportValidity()) return;
+    const email = ui.accountEmailInput.value.trim();
+    ui.accountSubmit.disabled = true;
+    try {
+      if (isCurrentUrlEmailLink()) {
+        setAccountMessage("Завершаю вход…");
+        await completeEmailLinkSignIn(firebase, email);
+      } else {
+        await firebase.sendSignInLink(email, {
+          url: `${window.location.origin}${window.location.pathname}`,
+          handleCodeInApp: true
+        });
+        try { localStorage.setItem(EMAIL_LINK_KEY, email); } catch { /* Cross-device completion can ask for the email. */ }
+        setAccountMessage("Письмо со ссылкой отправлено. Открой ссылку, чтобы войти и сохранить историю.");
+      }
+    } catch (error) {
+      if (isCurrentUrlEmailLink()) showEmailLinkError(error);
+      else setAccountMessage(friendlyAuthError(error), true);
+    } finally {
+      ui.accountSubmit.disabled = !firebase || cloudUnavailable;
+    }
+  }
+
+  async function syncCurrentAccount() {
+    if (!firebase || !cloudUser) return;
+    const uid = cloudUser.uid;
+    const version = authEventVersion;
+    try {
+      const remote = await firebase.loadSessions(uid);
+      if (version !== authEventVersion || cloudUser?.uid !== uid) return;
+      sessions = mergeSessions(remote, sessions);
+      try { localStorage.setItem(SESSION_OWNER_KEY, uid); } catch { /* The cloud copy remains available. */ }
+      saveSessions({ sync: false });
+      renderStatistics();
+      await firebase.saveSessions(uid, sessions);
+      if (version === authEventVersion && cloudUser?.uid === uid) setCloudStatus("История синхронизирована с аккаунтом.");
+    } catch {
+      if (version === authEventVersion && cloudUser?.uid === uid) setCloudStatus("Не удалось синхронизировать историю. Записи остаются на устройстве.");
+    }
+  }
+
+  async function signOutFromAccount() {
+    if (!firebase || !cloudUser) return;
+    const uid = cloudUser.uid;
+    try {
+      localStorage.setItem(backupKey(uid), JSON.stringify(sessions));
+    } catch { /* The cloud copy remains available if local storage is full. */ }
+    ui.accountSignOut.disabled = true;
+    setAccountMessage("Выхожу из аккаунта…");
+    try {
+      await firebase.signOut();
+      sessions = [];
+      try {
+        localStorage.removeItem(SESSIONS_KEY);
+        localStorage.removeItem(SESSION_OWNER_KEY);
+      } catch { /* The account copy remains in Firestore. */ }
+      renderStatistics();
+      setAccountMessage("Ты вышла. История останется в аккаунте и появится после следующего входа.");
+    } catch (error) {
+      setAccountMessage(friendlyAuthError(error), true);
+    } finally {
+      ui.accountSignOut.disabled = false;
+    }
+  }
+
   function recordCompletedSession() {
     const durationSeconds = getPhases().reduce((sum, phase) => sum + phase.seconds, 0) * state.rounds;
+    const completedAt = Date.now();
     const record = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       startedAt: state.sessionStartedAt || Date.now(),
-      completedAt: Date.now(),
+      completedAt,
+      updatedAt: completedAt,
       mode: state.mode,
       rounds: state.rounds,
       durationSeconds,
@@ -667,6 +944,14 @@
     if (state.sound) playChime();
   });
   ui.themeToggle.addEventListener("click", () => setTheme(theme === "dark" ? "light" : "dark"));
+  ui.accountButton.addEventListener("click", openAccountDialog);
+  ui.accountClose.addEventListener("click", closeAccountDialog);
+  ui.accountOverlay.addEventListener("click", (event) => {
+    if (event.target === ui.accountOverlay) closeAccountDialog();
+  });
+  ui.accountForm.addEventListener("submit", sendEmailLinkFromForm);
+  ui.accountSignOut.addEventListener("click", signOutFromAccount);
+  window.addEventListener("online", syncCurrentAccount);
   ui.statsToggle.addEventListener("click", () => ui.statsPanel.hidden ? openStatistics() : closeStatistics());
   ui.closeStats.addEventListener("click", closeStatistics);
   ui.statsTabs.forEach((tab) => tab.addEventListener("click", () => {
@@ -689,15 +974,37 @@
     statsView = "days";
     renderStatistics();
   });
-  ui.clearStats.addEventListener("click", () => {
-    if (!sessions.length || !window.confirm("Удалить всю историю практик и настроения из этого браузера?")) return;
+  ui.clearStats.addEventListener("click", async () => {
+    if (!sessions.length) return;
+    const scope = cloudUser ? "из аккаунта и этого браузера" : "из этого браузера";
+    if (!window.confirm(`Удалить всю историю практик и настроения ${scope}? Это действие нельзя отменить.`)) return;
+    if (cloudUser && firebase) {
+      ui.clearStats.disabled = true;
+      setCloudStatus("Удаляю историю из аккаунта…");
+      try {
+        await firebase.clearSessions(cloudUser.uid);
+      } catch {
+        setCloudStatus("Не удалось удалить облачную историю. Локальные записи сохранены.");
+        ui.clearStats.disabled = false;
+        return;
+      }
+    }
     sessions = [];
-    saveSessions();
+    saveSessions({ sync: false });
+    if (cloudUser) {
+      try { localStorage.setItem(backupKey(cloudUser.uid), "[]"); } catch { /* The cloud copy has already been cleared. */ }
+    }
     renderStatistics();
+    setCloudStatus(cloudUser ? "История удалена из аккаунта и этого браузера." : "");
+    ui.clearStats.disabled = false;
   });
   ui.moodOptions.forEach((button) => button.addEventListener("click", () => chooseMood(button.dataset.mood)));
   ui.moodSkip.addEventListener("click", skipMoodPrompt);
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !ui.accountOverlay.hidden) {
+      closeAccountDialog();
+      return;
+    }
     if (event.key === "Escape" && !ui.moodOverlay.hidden) {
       skipMoodPrompt();
       return;
@@ -721,6 +1028,30 @@
     ui.install.hidden = true;
   });
   window.addEventListener("appinstalled", () => { ui.install.hidden = true; installPrompt = null; });
+
+  renderAccountState();
+  connectFirebase().then((client) => {
+    if (!client) {
+      cloudUnavailable = true;
+      renderAccountState();
+      setAccountMessage("Не удалось подключить облачный сервис. История продолжит храниться в браузере.", true);
+      return;
+    }
+    firebase = client;
+    renderAccountState();
+    client.watchAuth(handleAuthState, () => {
+      cloudUnavailable = true;
+      renderAccountState();
+      setAccountMessage("Не удалось проверить состояние аккаунта. История остаётся в браузере.", true);
+    });
+    finishEmailLinkIfPresent(client).catch((error) => {
+      setAccountMessage(friendlyAuthError(error), true);
+    });
+  }).catch(() => {
+    cloudUnavailable = true;
+    renderAccountState();
+    setAccountMessage("Не удалось подключить облачный сервис. История продолжит храниться в браузере.", true);
+  });
 
   setTheme(theme, false);
   createSparkParticles();
