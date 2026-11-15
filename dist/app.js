@@ -15,6 +15,16 @@
         { side: 3, seconds, cue: "Пауза", caption: "мягкая пауза", announcement: "Мягкая пауза." }
       ]
     },
+    "uneven-square": {
+      title: "Неравный квадрат",
+      labels: ["Вдох", "Пауза", "Выдох", "Пауза"],
+      phases: () => [
+        { side: 0, seconds: 4, cue: "Вдох", caption: "мягко, без усилия", announcement: "Вдохни мягко и спокойно." },
+        { side: 1, seconds: 2, cue: "Пауза", caption: "короткая пауза", announcement: "Мягкая короткая пауза." },
+        { side: 2, seconds: 2, cue: "Выдох", caption: "спокойно отпусти воздух", announcement: "Спокойно выдохни, не выталкивая воздух." },
+        { side: 3, seconds: 2, cue: "Пауза", caption: "короткая пауза", announcement: "Мягкая короткая пауза." }
+      ]
+    },
     "long-exhale": {
       title: "Длинный выдох",
       labels: ["Вдох", "", "Выдох", ""],
@@ -417,7 +427,7 @@
     ui.secondsValue.textContent = String(state.seconds);
     ui.roundsValue.textContent = String(state.rounds);
     ui.roundLabel.textContent = russianCount(state.rounds, "круг", "круга", "кругов");
-    ui.roundsHint.textContent = state.mode === "square" ? "один круг — четыре стороны" : state.mode === "long-exhale" ? "один круг — вдох и выдох" : "один круг — три мягких шага";
+    ui.roundsHint.textContent = state.mode === "square" ? "один круг — четыре равные стороны" : state.mode === "uneven-square" ? "один круг — четыре фазы разной длины" : state.mode === "long-exhale" ? "один круг — вдох и выдох" : "один круг — три мягких шага";
     $("seconds-minus").disabled = state.seconds <= 2 || locked;
     $("seconds-plus").disabled = state.seconds >= 10 || locked;
     $("rounds-minus").disabled = state.rounds <= 1 || locked;
