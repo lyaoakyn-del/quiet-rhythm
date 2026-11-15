@@ -348,7 +348,7 @@
       : "Отметь настроение после дыхания — или пропусти, если не хочется.";
     ui.moodSkip.textContent = stage === "before" ? "Пропустить и начать" : "Сохранить без оценки";
     ui.moodOverlay.hidden = false;
-    requestAnimationFrame(() => ui.moodOptions[2]?.focus());
+    requestAnimationFrame(() => ui.moodTitle.focus());
   }
 
   function hideMoodPrompt() {
