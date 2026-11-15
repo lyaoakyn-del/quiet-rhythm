@@ -8,6 +8,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./icons/app-icon.svg" type="image/svg+xml">
+    <script>try{if(localStorage.getItem("quiet-square.theme.v1")==="dark")document.documentElement.dataset.theme="dark"}catch{}</script>
     <link rel="stylesheet" href="./styles.css">
     <title>Тихий ритм — дыхательные практики</title>
   </head>
@@ -18,7 +19,11 @@
           <span class="brand-mark" aria-hidden="true"><span></span></span>
           <span class="brand-name">тихий круг</span>
         </a>
-        <button class="install-button" id="install-button" type="button" hidden>Добавить на экран</button>
+        <div class="topbar-actions">
+          <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="Включить тёмную тему"><span id="theme-icon" aria-hidden="true">☾</span></button>
+          <button class="icon-button stats-toggle" id="stats-toggle" type="button" aria-label="Открыть статистику" aria-expanded="false" aria-controls="statistics-panel"><span class="stats-icon" aria-hidden="true">▥</span><span class="stats-button-label">Статистика</span></button>
+          <button class="install-button" id="install-button" type="button" hidden>Добавить на экран</button>
+        </div>
       </header>
 
       <main class="app-layout">
@@ -27,7 +32,7 @@
           <h1 id="page-title">Вернись<br><span>в свой ритм.</span></h1>
           <p class="intro-copy">Выбери ритм под своё состояние: ровный квадрат, мягкий длинный выдох или циклический вздох.</p>
 
-          <p class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span> Настройки остаются в этом браузере</p>
+          <p class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span> Практики и оценки хранятся в этом браузере</p>
         </section>
 
         <aside class="settings-card" aria-labelledby="settings-title">
@@ -105,6 +110,7 @@
               <path class="square-side" data-side="1" d="M 184 56 V 184"></path>
               <path class="square-side" data-side="2" d="M 184 184 H 56"></path>
               <path class="square-side" data-side="3" d="M 56 184 V 56"></path>
+              <g class="spark-trail" id="spark-trail" aria-hidden="true"></g>
               <circle class="breath-marker" id="breath-marker" cx="56" cy="56" r="7"></circle>
               <circle class="marker-halo" id="marker-halo" cx="56" cy="56" r="15"></circle>
             </svg>
@@ -135,7 +141,53 @@
         </section>
       </main>
 
+      <section class="statistics-panel" id="statistics-panel" aria-labelledby="statistics-title" hidden>
+        <div class="statistics-heading">
+          <div>
+            <p class="section-kicker">личная история</p>
+            <h2 id="statistics-title">Твоя статистика</h2>
+          </div>
+          <button class="close-statistics" id="close-statistics" type="button" aria-label="Закрыть статистику">×</button>
+        </div>
+        <p class="statistics-note">Здесь сохраняются завершённые практики и выбранные оценки настроения. Данные доступны только в этом браузере.</p>
+        <div class="statistics-toolbar">
+          <div class="statistics-tabs" role="group" aria-label="Период статистики">
+            <button class="statistics-tab is-selected" type="button" data-stats-view="days" aria-pressed="true">По дням</button>
+            <button class="statistics-tab" type="button" data-stats-view="months" aria-pressed="false">По месяцам</button>
+          </div>
+          <div class="period-navigation">
+            <button class="period-button" id="period-prev" type="button" aria-label="Предыдущий период">‹</button>
+            <strong id="period-label"></strong>
+            <button class="period-button" id="period-next" type="button" aria-label="Следующий период">›</button>
+          </div>
+        </div>
+        <div class="statistics-summary" id="statistics-summary"></div>
+        <div class="statistics-insight" id="statistics-insight"></div>
+        <div class="mode-mood-grid" id="mode-mood-statistics"></div>
+        <div class="statistics-content" id="statistics-content"></div>
+        <div class="statistics-footer">
+          <span>Изменение оценок показывает совпадение во времени, а не доказывает причину.</span>
+          <button class="clear-statistics" id="clear-statistics" type="button">Удалить историю</button>
+        </div>
+      </section>
+
       <footer class="footer"><span>мягкий ритм · один момент за раз</span><span>дыши без усилия</span></footer>
+    </div>
+
+    <div class="mood-overlay" id="mood-overlay" hidden>
+      <section class="mood-dialog" role="dialog" aria-modal="true" aria-labelledby="mood-title" aria-describedby="mood-copy">
+        <p class="section-kicker" id="mood-kicker">короткая отметка</p>
+        <h2 id="mood-title">Как ты себя чувствуешь?</h2>
+        <p class="mood-copy" id="mood-copy">Оцени настроение сейчас — это необязательно.</p>
+        <div class="mood-scale" role="group" aria-label="Оценка настроения от 1 до 5">
+          <button class="mood-option" type="button" data-mood="1" aria-label="1 из 5: очень тяжело"><span aria-hidden="true">☹</span><small>тяжело</small></button>
+          <button class="mood-option" type="button" data-mood="2" aria-label="2 из 5: скорее тяжело"><span aria-hidden="true">🙁</span><small>грустно</small></button>
+          <button class="mood-option" type="button" data-mood="3" aria-label="3 из 5: нейтрально"><span aria-hidden="true">😐</span><small>ровно</small></button>
+          <button class="mood-option" type="button" data-mood="4" aria-label="4 из 5: хорошо"><span aria-hidden="true">🙂</span><small>хорошо</small></button>
+          <button class="mood-option" type="button" data-mood="5" aria-label="5 из 5: очень хорошо"><span aria-hidden="true">😊</span><small>отлично</small></button>
+        </div>
+        <button class="mood-skip" id="mood-skip" type="button">Пропустить</button>
+      </section>
     </div>
     <script src="./app.js" defer></script>
   </body>

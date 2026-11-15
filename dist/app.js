@@ -1,6 +1,9 @@
 (() => {
   const DEFAULTS = { mode: "square", seconds: 4, rounds: 4, sound: false };
   const SETTINGS_KEY = "quiet-square.settings.v1";
+  const SESSIONS_KEY = "quiet-square.sessions.v1";
+  const THEME_KEY = "quiet-square.theme.v1";
+  const MOODS = { 1: "тяжело", 2: "грустно", 3: "ровно", 4: "хорошо", 5: "отлично" };
   const MODES = {
     square: {
       title: "Ровный квадрат",
@@ -46,11 +49,29 @@
     durationSetting: $("duration-setting"), durationLabel: $("duration-label"), durationHint: $("duration-hint"),
     start: $("start-button"), startLabel: $("start-label"), reset: $("reset-button"),
     sound: $("sound-button"), soundLabel: $("sound-label"), marker: $("breath-marker"), halo: $("marker-halo"),
-    install: $("install-button")
+    sparkTrail: $("spark-trail"), install: $("install-button"),
+    themeToggle: $("theme-toggle"), themeIcon: $("theme-icon"), statsToggle: $("stats-toggle"), statsPanel: $("statistics-panel"),
+    closeStats: $("close-statistics"), statsTabs: [...document.querySelectorAll("[data-stats-view]")],
+    periodLabel: $("period-label"), periodPrev: $("period-prev"), periodNext: $("period-next"),
+    statsSummary: $("statistics-summary"), statsInsight: $("statistics-insight"), modeMood: $("mode-mood-statistics"), statsContent: $("statistics-content"),
+    clearStats: $("clear-statistics"), moodOverlay: $("mood-overlay"), moodTitle: $("mood-title"), moodKicker: $("mood-kicker"),
+    moodCopy: $("mood-copy"), moodSkip: $("mood-skip"), moodOptions: [...document.querySelectorAll("[data-mood]")]
   };
 
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch { saved = {}; }
+  let sessions = [];
+  try {
+    const storedSessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
+    if (Array.isArray(storedSessions)) sessions = storedSessions.filter((session) => session && Number.isFinite(session.startedAt) && MODES[session.mode]);
+  } catch { sessions = []; }
+  let theme = "light";
+  try { theme = localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light"; } catch { /* Theme setting is optional. */ }
+  let statsView = "days";
+  let selectedMonth = localMonthKey(new Date());
+  let selectedYear = new Date().getFullYear();
+  let moodStage = "";
+  let sparkParticles = [];
   const state = {
     mode: Object.hasOwn(MODES, saved.mode) ? saved.mode : DEFAULTS.mode,
     seconds: validNumber(saved.seconds, 2, 10, DEFAULTS.seconds),
@@ -64,11 +85,96 @@
     endsAt: 0,
     remainingMs: 0,
     frame: 0,
-    audio: null
+    audio: null,
+    practiceStarted: false,
+    sessionStartedAt: 0,
+    moodBefore: null,
+    currentRecordId: null
   };
 
   function validNumber(value, min, max, fallback) {
     return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+  }
+
+  function localDateKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function localMonthKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function formatDuration(seconds) {
+    const whole = Math.max(0, Math.round(seconds || 0));
+    if (whole < 60) return `${whole} ${russianCount(whole, "секунда", "секунды", "секунд")}`;
+    const minutes = Math.floor(whole / 60);
+    const remainder = whole % 60;
+    return `${minutes} ${russianCount(minutes, "минута", "минуты", "минут")}${remainder ? ` ${remainder} с` : ""}`;
+  }
+
+  function formatDurationCompact(seconds) {
+    const whole = Math.max(0, Math.round(seconds || 0));
+    const minutes = Math.floor(whole / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours) return `${hours} ч ${minutes % 60} м`;
+    if (minutes) return `${minutes} м`;
+    return `${whole} с`;
+  }
+
+  function formatMoodPair(before, after) {
+    if (before == null && after == null) return "без оценки настроения";
+    const left = before == null ? "—" : `${before}/5`;
+    const right = after == null ? "—" : `${after}/5`;
+    return `настроение ${left} → ${right}`;
+  }
+
+  function saveSessions() {
+    try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); } catch { /* Keep the session available even if storage is full. */ }
+  }
+
+  function setTheme(nextTheme, persist = true) {
+    theme = nextTheme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = theme;
+    ui.themeIcon.textContent = theme === "dark" ? "☀" : "☾";
+    ui.themeToggle.setAttribute("aria-label", theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему");
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.content = theme === "dark" ? "#0b100e" : "#f7f7f2";
+    if (persist) {
+      try { localStorage.setItem(THEME_KEY, theme); } catch { /* Theme setting is optional. */ }
+    }
+  }
+
+  function createSparkParticles() {
+    const ns = "http://www.w3.org/2000/svg";
+    sparkParticles = Array.from({ length: 18 }, (_, index) => {
+      const particle = document.createElementNS(ns, "circle");
+      particle.classList.add("spark-particle");
+      particle.setAttribute("r", String([1.2, 1.7, 2.2, 1.4][index % 4]));
+      particle.style.animationDelay = `${-(index % 6) * 0.07}s`;
+      particle.style.opacity = "0";
+      ui.sparkTrail.append(particle);
+      return particle;
+    });
+  }
+
+  function updateSparkTrail(side, progress) {
+    if (!sparkParticles.length) return;
+    const count = sparkParticles.length;
+    sparkParticles.forEach((particle, index) => {
+      const lag = ((index + 1) / count) * .42;
+      const pointProgress = progress - lag;
+      if (pointProgress <= 0) {
+        particle.style.opacity = "0";
+        return;
+      }
+      const point = positions[side](Math.min(1, pointProgress));
+      const spread = ((index * 7) % 9 - 4) * .72;
+      if (side === 0 || side === 2) point.y += spread;
+      else point.x += spread;
+      particle.setAttribute("cx", String(point.x));
+      particle.setAttribute("cy", String(point.y));
+      particle.style.opacity = String((1 - index / count) * .86);
+    });
   }
 
   function getPhases() {
@@ -97,6 +203,210 @@
       dot.className = `progress-dot${i < state.completedRounds ? " is-done" : ""}`;
       ui.progressDots.append(dot);
     }
+  }
+
+  function formatMoodAverage(value) {
+    return value == null ? "—" : value.toFixed(1);
+  }
+
+  function renderStatistics() {
+    const now = new Date();
+    const currentMonth = localMonthKey(now);
+    const monthDate = parseMonthKey(selectedMonth);
+    const inPeriod = sessions.filter((session) => {
+      const date = new Date(session.startedAt);
+      return statsView === "days" ? localMonthKey(date) === selectedMonth : date.getFullYear() === selectedYear;
+    });
+    const paired = inPeriod.filter((session) => session.moodBefore != null && session.moodAfter != null);
+    const avgBefore = paired.length ? paired.reduce((sum, session) => sum + session.moodBefore, 0) / paired.length : null;
+    const avgAfter = paired.length ? paired.reduce((sum, session) => sum + session.moodAfter, 0) / paired.length : null;
+    const secondsTotal = inPeriod.reduce((sum, session) => sum + (session.durationSeconds || 0), 0);
+
+    ui.statsTabs.forEach((tab) => {
+      const selected = tab.dataset.statsView === statsView;
+      tab.classList.toggle("is-selected", selected);
+      tab.setAttribute("aria-pressed", String(selected));
+    });
+    if (statsView === "days") {
+      ui.periodLabel.textContent = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(monthDate);
+      ui.periodPrev.setAttribute("aria-label", "Предыдущий месяц");
+      ui.periodNext.setAttribute("aria-label", "Следующий месяц");
+      ui.periodNext.disabled = selectedMonth >= currentMonth;
+      ui.statsContent.innerHTML = renderDailyGroups(inPeriod);
+    } else {
+      ui.periodLabel.textContent = String(selectedYear);
+      ui.periodPrev.setAttribute("aria-label", "Предыдущий год");
+      ui.periodNext.setAttribute("aria-label", "Следующий год");
+      ui.periodNext.disabled = selectedYear >= now.getFullYear();
+      ui.statsContent.innerHTML = renderMonths(selectedYear);
+    }
+
+    ui.statsSummary.innerHTML = `
+      <div class="summary-card"><span class="summary-label">Завершённых практик</span><strong class="summary-value">${inPeriod.length}</strong></div>
+      <div class="summary-card"><span class="summary-label">Время дыхания</span><strong class="summary-value">${inPeriod.length ? formatDurationCompact(secondsTotal) : "—"}</strong></div>
+      <div class="summary-card"><span class="summary-label">Среднее настроение до → после</span><strong class="summary-value">${formatMoodAverage(avgBefore)} <small>→</small> ${formatMoodAverage(avgAfter)}</strong></div>`;
+    ui.modeMood.innerHTML = Object.keys(MODES).map((mode) => {
+      const modeItems = inPeriod.filter((session) => session.mode === mode);
+      const modePairs = modeItems.filter((session) => session.moodBefore != null && session.moodAfter != null);
+      const before = modePairs.length ? modePairs.reduce((sum, session) => sum + session.moodBefore, 0) / modePairs.length : null;
+      const after = modePairs.length ? modePairs.reduce((sum, session) => sum + session.moodAfter, 0) / modePairs.length : null;
+      const moodLabel = modePairs.length ? `${formatMoodAverage(before)} → ${formatMoodAverage(after)}` : "пока нет парных оценок";
+      const practiceLabel = `${modeItems.length} ${russianCount(modeItems.length, "практика", "практики", "практик")} · оценок до/после: ${modePairs.length}`;
+      return `<div class="mode-mood-card"><strong>${MODES[mode].title}</strong><span>${moodLabel}</span><small>${practiceLabel}</small></div>`;
+    }).join("");
+
+    if (!inPeriod.length) {
+      ui.statsInsight.textContent = statsView === "days" ? "В этом месяце пока нет завершённых практик." : "За этот год пока нет завершённых практик.";
+    } else {
+      const counts = Object.keys(MODES).map((mode) => ({ mode, count: inPeriod.filter((item) => item.mode === mode).length })).sort((a, b) => b.count - a.count);
+      const top = counts[0];
+      const moodNote = paired.length ? ` · парных оценок: ${paired.length}` : " · парных оценок настроения пока нет";
+      ui.statsInsight.textContent = `Чаще всего: ${MODES[top.mode].title.toLowerCase()} — ${top.count} ${russianCount(top.count, "раз", "раза", "раз")}${moodNote}.`;
+    }
+  }
+
+  function parseMonthKey(key) {
+    const [year, month] = key.split("-").map(Number);
+    return new Date(year, month - 1, 1, 12);
+  }
+
+  function renderDailyGroups(periodSessions) {
+    if (!periodSessions.length) return '<div class="stats-empty">Заверши практику, и здесь появятся дата, режим и длительность.</div>';
+    const grouped = new Map();
+    periodSessions.forEach((session) => {
+      const key = localDateKey(new Date(session.startedAt));
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(session);
+    });
+    return [...grouped.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([dateKey, items]) => {
+      const date = new Date(`${dateKey}T12:00:00`);
+      const dateTitle = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).format(date);
+      const totalSeconds = items.reduce((sum, session) => sum + (session.durationSeconds || 0), 0);
+      const summary = `${items.length} ${russianCount(items.length, "практика", "практики", "практик")} · ${formatDuration(totalSeconds)}`;
+      const rows = items.sort((a, b) => b.startedAt - a.startedAt).map((session) => {
+        const time = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(session.startedAt));
+        const rounds = session.rounds || 1;
+        const roundText = `${rounds} ${russianCount(rounds, "круг", "круга", "кругов")}`;
+        return `<div class="session-row">
+          <time class="session-time" datetime="${new Date(session.startedAt).toISOString()}">${time}</time>
+          <div class="session-main"><strong>${MODES[session.mode]?.title || "Дыхательная практика"}</strong><span>${roundText} · ${formatDuration(session.durationSeconds)}</span></div>
+          <span class="session-mood">${formatMoodPair(session.moodBefore, session.moodAfter)}</span>
+        </div>`;
+      }).join("");
+      return `<section class="day-group"><div class="day-heading"><strong>${dateTitle}</strong><span>${summary}</span></div><div class="session-list">${rows}</div></section>`;
+    }).join("");
+  }
+
+  function renderMonths(year) {
+    const monthNames = Array.from({ length: 12 }, (_, index) => new Intl.DateTimeFormat("ru-RU", { month: "long" }).format(new Date(year, index, 1, 12)));
+    const visibleMonths = year === new Date().getFullYear() ? new Date().getMonth() + 1 : 12;
+    return `<div class="month-list">${monthNames.slice(0, visibleMonths).map((name, index) => {
+      const key = `${year}-${String(index + 1).padStart(2, "0")}`;
+      const items = sessions.filter((session) => localMonthKey(new Date(session.startedAt)) === key);
+      const seconds = items.reduce((sum, session) => sum + (session.durationSeconds || 0), 0);
+      const count = `${items.length} ${russianCount(items.length, "практика", "практики", "практик")}`;
+      const modes = Object.keys(MODES).filter((mode) => items.some((session) => session.mode === mode)).map((mode) => {
+        const total = items.filter((session) => session.mode === mode).length;
+        return `${MODES[mode].title.toLowerCase()} ${total}`;
+      }).join(" · ") || "практик пока нет";
+      return `<button class="month-row" type="button" data-month="${key}" aria-label="Открыть ${name} ${year}: ${count}"><strong>${name}</strong><span class="month-count">${items.length}</span><small>${count} · ${formatDuration(seconds)} · ${modes}</small></button>`;
+    }).join("")}</div>`;
+  }
+
+  function openStatistics() {
+    ui.statsPanel.hidden = false;
+    ui.statsToggle.setAttribute("aria-expanded", "true");
+    ui.statsToggle.setAttribute("aria-label", "Закрыть статистику");
+    renderStatistics();
+    ui.statsPanel.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  }
+
+  function closeStatistics() {
+    ui.statsPanel.hidden = true;
+    ui.statsToggle.setAttribute("aria-expanded", "false");
+    ui.statsToggle.setAttribute("aria-label", "Открыть статистику");
+    ui.statsToggle.focus();
+  }
+
+  function moveStatisticsPeriod(delta) {
+    if (statsView === "days") {
+      const [year, month] = selectedMonth.split("-").map(Number);
+      const next = new Date(year, month - 1 + delta, 1, 12);
+      if (localMonthKey(next) <= localMonthKey(new Date())) selectedMonth = localMonthKey(next);
+    } else {
+      selectedYear = Math.min(new Date().getFullYear(), selectedYear + delta);
+    }
+    renderStatistics();
+  }
+
+  function showMoodPrompt(stage) {
+    moodStage = stage;
+    ui.moodKicker.textContent = stage === "before" ? "до практики" : "после практики";
+    ui.moodTitle.textContent = stage === "before" ? "Как ты себя чувствуешь?" : "Как ты себя чувствуешь сейчас?";
+    ui.moodCopy.textContent = stage === "before"
+      ? "Отметка поможет сравнить настроение до и после. Можно пропустить."
+      : "Отметь настроение после дыхания — или пропусти, если не хочется.";
+    ui.moodSkip.textContent = stage === "before" ? "Пропустить и начать" : "Сохранить без оценки";
+    ui.moodOverlay.hidden = false;
+    requestAnimationFrame(() => ui.moodOptions[2]?.focus());
+  }
+
+  function hideMoodPrompt() {
+    ui.moodOverlay.hidden = true;
+    moodStage = "";
+  }
+
+  function chooseMood(value) {
+    const rating = Number(value);
+    const stage = moodStage;
+    hideMoodPrompt();
+    if (stage === "before") {
+      state.moodBefore = rating;
+      startTimer();
+      return;
+    }
+    if (stage === "after") {
+      const record = sessions.find((session) => session.id === state.currentRecordId);
+      if (record) {
+        record.moodAfter = rating;
+        saveSessions();
+      }
+      if (!ui.statsPanel.hidden) renderStatistics();
+      ui.start.focus();
+    }
+  }
+
+  function skipMoodPrompt() {
+    const stage = moodStage;
+    hideMoodPrompt();
+    if (stage === "before") {
+      state.moodBefore = null;
+      startTimer();
+      return;
+    }
+    if (stage === "after") {
+      if (!ui.statsPanel.hidden) renderStatistics();
+      ui.start.focus();
+    }
+  }
+
+  function recordCompletedSession() {
+    const durationSeconds = getPhases().reduce((sum, phase) => sum + phase.seconds, 0) * state.rounds;
+    const record = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      startedAt: state.sessionStartedAt || Date.now(),
+      completedAt: Date.now(),
+      mode: state.mode,
+      rounds: state.rounds,
+      durationSeconds,
+      moodBefore: state.moodBefore,
+      moodAfter: null
+    };
+    sessions.push(record);
+    state.currentRecordId = record.id;
+    saveSessions();
+    if (!ui.statsPanel.hidden) renderStatistics();
+    showMoodPrompt("after");
   }
 
   function renderSettings() {
@@ -150,7 +460,10 @@
       label.classList.toggle("is-active", state.running && sideNumber === info.side);
     });
     if (announce) ui.announcer.textContent = info.announcement;
-    if (!state.running) setMarker(positions[info.side](0));
+    if (!state.running) {
+      setMarker(positions[info.side](0));
+      updateSparkTrail(info.side, 0);
+    }
     renderSettings();
   }
 
@@ -193,12 +506,25 @@
       ui.announcer.textContent = "Таймер приостановлен.";
       document.querySelectorAll(".square-side").forEach((side) => side.classList.remove("is-active"));
       document.querySelectorAll(".side-label").forEach((label) => label.classList.remove("is-active"));
+      updateSparkTrail(getPhases()[state.phase].side, 0);
       setButtonMode();
       renderSettings();
       return;
     }
 
     if (state.complete) resetSession();
+    if (!state.paused && !state.practiceStarted) {
+      showMoodPrompt("before");
+      return;
+    }
+    startTimer();
+  }
+
+  function startTimer() {
+    if (!state.practiceStarted) {
+      state.practiceStarted = true;
+      state.sessionStartedAt = Date.now();
+    }
     state.running = true;
     state.paused = false;
     const current = getPhases()[state.phase];
@@ -225,8 +551,10 @@
         ui.announcer.textContent = "Практика завершена. Возвращайся к обычному, свободному дыханию.";
         document.querySelectorAll(".square-side").forEach((side) => side.classList.remove("is-active"));
         document.querySelectorAll(".side-label").forEach((label) => label.classList.remove("is-active"));
+        updateSparkTrail(getPhases()[state.phase].side, 0);
         renderSettings();
         setButtonMode();
+        recordCompletedSession();
         return;
       }
       state.completedRounds = Math.min(state.completedRounds, state.rounds);
@@ -253,6 +581,7 @@
     ui.countdown.textContent = String(Math.max(1, Math.ceil(remaining / 1000)));
     const elapsed = 1 - remaining / (current.seconds * 1000);
     setMarker(positions[current.side](Math.min(1, Math.max(0, elapsed))));
+    updateSparkTrail(current.side, Math.min(1, Math.max(0, elapsed)));
     state.frame = requestAnimationFrame(tick);
   }
 
@@ -264,6 +593,10 @@
     state.phase = 0;
     state.completedRounds = 0;
     state.remainingMs = 0;
+    state.practiceStarted = false;
+    state.sessionStartedAt = 0;
+    state.moodBefore = null;
+    state.currentRecordId = null;
     ui.countdown.textContent = String(getPhases()[0].seconds);
     ui.announcer.textContent = "Выбери режим и нажми «Начать».";
     renderPhase(0);
@@ -323,8 +656,43 @@
     renderSettings();
     if (state.sound) playChime();
   });
+  ui.themeToggle.addEventListener("click", () => setTheme(theme === "dark" ? "light" : "dark"));
+  ui.statsToggle.addEventListener("click", () => ui.statsPanel.hidden ? openStatistics() : closeStatistics());
+  ui.closeStats.addEventListener("click", closeStatistics);
+  ui.statsTabs.forEach((tab) => tab.addEventListener("click", () => {
+    statsView = tab.dataset.statsView;
+    if (statsView === "months") selectedYear = Number(selectedMonth.slice(0, 4));
+    else {
+      const monthPart = selectedMonth.slice(5);
+      selectedMonth = `${selectedYear}-${monthPart}`;
+      if (selectedMonth > localMonthKey(new Date())) selectedMonth = localMonthKey(new Date());
+    }
+    renderStatistics();
+  }));
+  ui.periodPrev.addEventListener("click", () => moveStatisticsPeriod(-1));
+  ui.periodNext.addEventListener("click", () => moveStatisticsPeriod(1));
+  ui.statsContent.addEventListener("click", (event) => {
+    const monthButton = event.target.closest("[data-month]");
+    if (!monthButton) return;
+    selectedMonth = monthButton.dataset.month;
+    selectedYear = Number(selectedMonth.slice(0, 4));
+    statsView = "days";
+    renderStatistics();
+  });
+  ui.clearStats.addEventListener("click", () => {
+    if (!sessions.length || !window.confirm("Удалить всю историю практик и настроения из этого браузера?")) return;
+    sessions = [];
+    saveSessions();
+    renderStatistics();
+  });
+  ui.moodOptions.forEach((button) => button.addEventListener("click", () => chooseMood(button.dataset.mood)));
+  ui.moodSkip.addEventListener("click", skipMoodPrompt);
   document.addEventListener("keydown", (event) => {
-    if (event.code !== "Space" || event.repeat || ["BUTTON", "INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if (event.key === "Escape" && !ui.moodOverlay.hidden) {
+      skipMoodPrompt();
+      return;
+    }
+    if (!ui.moodOverlay.hidden || event.code !== "Space" || event.repeat || ["BUTTON", "INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
     event.preventDefault();
     startOrPause();
   });
@@ -344,6 +712,8 @@
   });
   window.addEventListener("appinstalled", () => { ui.install.hidden = true; installPrompt = null; });
 
+  setTheme(theme, false);
+  createSparkParticles();
   renderSettings();
   renderPhase(0);
   ui.countdown.textContent = String(getPhases()[0].seconds);
