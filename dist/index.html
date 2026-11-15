@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f7f7f2">
+    <meta name="description" content="Спокойный таймер дыхания по квадрату: вдох, пауза, выдох, пауза.">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/app-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+    <title>Квадрат дыхания</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Квадрат дыхания — на главную">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span class="brand-name">тихий круг</span>
+        </a>
+        <button class="install-button" id="install-button" type="button" hidden>Добавить на экран</button>
+      </header>
+
+      <main class="app-layout">
+        <section class="intro" aria-labelledby="page-title">
+          <p class="eyebrow"><span class="eyebrow-dot"></span> дыхательная практика</p>
+          <h1 id="page-title">Вернись<br><span>в свой ритм.</span></h1>
+          <p class="intro-copy">Четыре стороны квадрата — один простой ритм: вдох, пауза, выдох и ещё одна пауза.</p>
+
+          <p class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span> Настройки остаются в этом браузере</p>
+        </section>
+
+        <aside class="settings-card" aria-labelledby="settings-title">
+          <div class="settings-heading">
+            <div>
+              <p class="section-kicker">настрой практику</p>
+              <h2 id="settings-title">Твой квадрат</h2>
+            </div>
+            <span class="settings-glyph" aria-hidden="true">✳</span>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-copy">
+              <span class="setting-label">Длительность стороны</span>
+              <span class="setting-hint">одинаковая для всех четырёх</span>
+            </div>
+            <div class="stepper" aria-label="Длительность стороны">
+              <button class="step-button" id="seconds-minus" type="button" aria-label="Уменьшить длительность">−</button>
+              <span class="step-value"><span id="seconds-value">4</span><small>с</small></span>
+              <button class="step-button" id="seconds-plus" type="button" aria-label="Увеличить длительность">+</button>
+            </div>
+          </div>
+
+          <div class="setting-row setting-row-last">
+            <div class="setting-copy">
+              <span class="setting-label">Количество кругов</span>
+              <span class="setting-hint">один круг — четыре стороны</span>
+            </div>
+            <div class="stepper" aria-label="Количество кругов">
+              <button class="step-button" id="rounds-minus" type="button" aria-label="Уменьшить количество кругов">−</button>
+              <span class="step-value"><span id="rounds-value">4</span><small id="round-label">круга</small></span>
+              <button class="step-button" id="rounds-plus" type="button" aria-label="Увеличить количество кругов">+</button>
+            </div>
+          </div>
+
+          <div class="setting-note"><span aria-hidden="true">↗</span> Выбирай комфортный темп. Можно остановиться в любой момент.</div>
+        </aside>
+
+        <section class="practice-card" aria-labelledby="practice-title">
+          <div class="practice-topline">
+            <div>
+              <p class="section-kicker">пространство практики</p>
+              <h2 id="practice-title">Дыши по квадрату</h2>
+            </div>
+            <span class="round-counter" id="round-counter">КРУГ 1 / 4</span>
+          </div>
+
+          <div class="breath-stage" id="breath-stage" data-phase="ready">
+            <span class="side-label side-label-top" data-label-phase="0">Вдох</span>
+            <span class="side-label side-label-right" data-label-phase="1">Пауза</span>
+            <span class="side-label side-label-bottom" data-label-phase="2">Выдох</span>
+            <span class="side-label side-label-left" data-label-phase="3">Пауза</span>
+            <svg class="square-visual" viewBox="0 0 240 240" role="img" aria-labelledby="square-title square-desc">
+              <title id="square-title">Квадрат дыхания</title>
+              <desc id="square-desc">Четыре стороны обозначают вдох, паузу, выдох и паузу.</desc>
+              <path class="square-side" data-side="0" d="M 56 56 H 184"></path>
+              <path class="square-side" data-side="1" d="M 184 56 V 184"></path>
+              <path class="square-side" data-side="2" d="M 184 184 H 56"></path>
+              <path class="square-side" data-side="3" d="M 56 184 V 56"></path>
+              <circle class="breath-marker" id="breath-marker" cx="56" cy="56" r="7"></circle>
+              <circle class="marker-halo" id="marker-halo" cx="56" cy="56" r="15"></circle>
+            </svg>
+            <div class="breath-center" aria-live="off">
+              <span class="phase-cue" id="phase-cue">Готово</span>
+              <strong class="countdown" id="countdown">4</strong>
+              <span class="center-caption" id="center-caption">настрой свой ритм</span>
+            </div>
+          </div>
+
+          <p class="phase-announcer" id="phase-announcer" aria-live="polite" aria-atomic="true">Настрой темп и нажми «Начать».</p>
+
+          <div class="progress-row">
+            <div class="progress-dots" id="progress-dots" aria-hidden="true"></div>
+            <span class="progress-caption" id="progress-caption">4 спокойных круга</span>
+          </div>
+
+          <div class="control-row">
+            <button class="primary-button" id="start-button" type="button">
+              <span class="play-icon" aria-hidden="true">▶</span><span id="start-label">Начать</span>
+            </button>
+            <button class="secondary-button" id="reset-button" type="button" disabled>Сбросить</button>
+            <button class="sound-button" id="sound-button" type="button" aria-pressed="false">
+              <span class="sound-icon" aria-hidden="true">♪</span><span id="sound-label">Звук выключен</span>
+            </button>
+          </div>
+          <p class="keyboard-hint">Пробел — начать или поставить на паузу</p>
+        </section>
+      </main>
+
+      <footer class="footer"><span>четыре стороны · один момент за раз</span><span>сделано для спокойного ритма</span></footer>
+    </div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
