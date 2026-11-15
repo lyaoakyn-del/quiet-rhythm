@@ -6,6 +6,8 @@
 
 Сайт размещается как статические файлы на GitHub Pages. Firebase выполняет роль backend для аккаунтов и истории; отдельный сервер приложения не нужен. Firebase Web SDK загружается с официального CDN. Firebase Web-конфигурация находится в `dist/firebase-config.js`; её API key предназначен для клиентского приложения, а доступ к данным ограничивают правила Firestore.
 
+Публичная версия: <https://lyaoakyn-del.github.io/quiet-rhythm/>.
+
 ## Локальный запуск
 
 Откройте `dist/index.html` через локальный HTTP-сервер, например:
@@ -18,7 +20,7 @@ python -m http.server 8000 --directory dist
 
 ## Публикация
 
-Workflow `.github/workflows/pages.yml` публикует папку `dist/` на GitHub Pages при push в ветку `main`. В настройках репозитория для Pages должен быть выбран источник **GitHub Actions**. Для Firebase Authentication добавьте домен GitHub Pages (`<username>.github.io`) в список разрешённых доменов проекта Quiet Rhythm.
+Workflow `.github/workflows/pages.yml` публикует папку `dist/` на GitHub Pages при push в ветку `main`. Источник Pages в настройках репозитория — **GitHub Actions**. Для входа по email-ссылке в Firebase Authentication должен быть разрешён домен `lyaoakyn-del.github.io`.
 
 ## Структура
 
